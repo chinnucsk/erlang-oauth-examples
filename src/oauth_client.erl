@@ -4,7 +4,8 @@
 
 -export([access_token_params/1, deauthorize/1, get/2, get/3, get/4, get_access_token/2,
   get_access_token/3, get_access_token/4, get_request_token/2, get_request_token/3,
-  get_request_token/4, start/1, start/2, start_link/1, start_link/2, stop/1]).
+  get_request_token/4, get_request_token/6, start/1, start/2, start_link/1, 
+  start_link/2, stop/1, get_access_token/6]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 
@@ -33,6 +34,9 @@ get_request_token(Client, URL, Params) ->
 get_request_token(Client, URL, Params, ParamsMethod) ->
   gen_server:call(Client, {get_request_token, URL, Params, ParamsMethod}).
 
+get_request_token(Client, URL, Params, ParamsMethod, Realm, Domain) ->
+  gen_server:call(Client, {get_request_token, URL, Params, ParamsMethod, Realm, Domain}).
+
 get_access_token(Client, URL) ->
   get_access_token(Client, URL, [], header).
 
@@ -41,6 +45,9 @@ get_access_token(Client, URL, Params) ->
 
 get_access_token(Client, URL, Params, ParamsMethod) ->
   gen_server:call(Client, {get_access_token, URL, Params, ParamsMethod}).
+
+get_access_token(Client, URL, Params, ParamsMethod, Realm, Domain) ->
+  gen_server:call(Client, {get_access_token, URL, Params, ParamsMethod, Realm, Domain}).
 
 get(Client, URL) ->
   get(Client, URL, [], header).
@@ -71,6 +78,20 @@ oauth_get(header, URL, Params, Consumer, Token, TokenSecret) ->
   httpc:request(get, Request, [{autoredirect, false}], []);
 oauth_get(querystring, URL, Params, Consumer, Token, TokenSecret) ->
   oauth:get(URL, Params, Consumer, Token, TokenSecret).
+  
+oauth_post(header, URL, Params, Consumer, Token, TokenSecret, Realm, Domain) ->
+  Signed = oauth:sign("POST", URL, Params, Consumer, Token, TokenSecret),
+  {AuthorizationParams, QueryParams} = lists:partition(fun({K, _}) -> lists:prefix("oauth_", K) end, Signed),
+  Request = {oauth:uri(URL, QueryParams), header(AuthorizationParams, Domain, Realm), 
+             "application/x-www-form-urlencoded", ""},
+  httpc:request(post, Request, [{autoredirect, false}], [{headers_as_is, true}]).
+
+header(Params, Domain, Realm) ->
+  RealmHeader = string:concat(string:concat("OAuth realm=\"", Realm), "\", "),
+  [{"Host", Domain},
+   {"Connection", "keep-alive"},
+   {"Content-Type", "application/x-www-form-urlencoded"},
+   {"Authorization",  string:concat(RealmHeader, oauth:header_params_encode(Params))}].
 
 %%============================================================================
 %% gen_server callbacks
@@ -79,6 +100,16 @@ oauth_get(querystring, URL, Params, Consumer, Token, TokenSecret) ->
 init(Consumer) ->
   {ok, {Consumer}}.
 
+handle_call({get_request_token, URL, Params, ParamsMethod, Realm, Domain}, _From, State={Consumer}) ->
+  case oauth_post(ParamsMethod, URL, Params, Consumer, "", "", Realm, Domain) of
+    {ok, Response={{_, 200, _}, _, _}} ->
+      RParams = oauth:params_decode(Response),
+      {reply, {ok, oauth:token(RParams)}, {Consumer, RParams}};
+    {ok, Response} ->
+      {reply, Response, State};
+    Error ->
+      {reply, Error, State}
+  end;
 handle_call({get_request_token, URL, Params, ParamsMethod}, _From, State={Consumer}) ->
   case oauth_get(ParamsMethod, URL, Params, Consumer, "", "") of
     {ok, Response={{_, 200, _}, _, _}} ->
@@ -91,6 +122,16 @@ handle_call({get_request_token, URL, Params, ParamsMethod}, _From, State={Consum
   end;
 handle_call({get_access_token, URL, Params, ParamsMethod}, _From, State={Consumer, RParams}) ->
   case oauth_get(ParamsMethod, URL, Params, Consumer, oauth:token(RParams), oauth:token_secret(RParams)) of
+    {ok, Response={{_, 200, _}, _, _}} ->
+      AParams = oauth:params_decode(Response),
+      {reply, ok, {Consumer, RParams, AParams}};
+    {ok, Response} ->
+      {reply, Response, State};
+    Error ->
+      {reply, Error, State}
+  end;
+handle_call({get_access_token, URL, Params, ParamsMethod, Realm, Domain}, _From, State={Consumer, RParams}) ->
+  case oauth_post(ParamsMethod, URL, Params, Consumer, oauth:token(RParams), oauth:token_secret(RParams), Realm, Domain) of
     {ok, Response={{_, 200, _}, _, _}} ->
       AParams = oauth:params_decode(Response),
       {reply, ok, {Consumer, RParams, AParams}};
