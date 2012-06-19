@@ -1,6 +1,7 @@
 -module(oauth_openx_ox3).
 
--export([start/1, get_request_token/5, get_access_token/5, authorize_url/2, get_verifier/1]).
+-export([start/1, get_request_token/5, get_access_token/5, authorize_url/2, get_verifier/1,
+        request_token_params/1, get_access_token/6]).
 
 %% 
 %% Useage:
@@ -40,7 +41,14 @@ get_access_token(Client, URL, Verifier, Realm, Domain) ->
   Args = [{"oauth_verifier", Verifier}],
   oauth_client:get_access_token(Client, URL, Args, header, Realm, Domain).
 
+get_access_token(Client, URL, Verifier, Realm, Domain, RParams) ->
+  Args = [{"oauth_verifier", Verifier}],
+  oauth_client:get_access_token(Client, URL, Args, header, Realm, Domain, RParams).
+
 get_verifier(Uri) ->
   [_,QueryStr] = string:tokens(Uri, "?"),
   AccessParams = oauth:uri_params_decode(QueryStr),
   proplists:get_value("oauth_verifier", AccessParams).
+
+request_token_params(Client) ->
+    oauth_client:request_token_params(Client).

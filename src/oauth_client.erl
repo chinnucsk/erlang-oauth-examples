@@ -5,7 +5,7 @@
 -export([access_token_params/1, deauthorize/1, get/2, get/3, get/4, get_access_token/2,
   get_access_token/3, get_access_token/4, get_request_token/2, get_request_token/3,
   get_request_token/4, get_request_token/6, start/1, start/2, start_link/1, 
-  start_link/2, stop/1, get_access_token/6]).
+  start_link/2, stop/1, get_access_token/6, get_access_token/7, request_token_params/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 
@@ -49,6 +49,9 @@ get_access_token(Client, URL, Params, ParamsMethod) ->
 get_access_token(Client, URL, Params, ParamsMethod, Realm, Domain) ->
   gen_server:call(Client, {get_access_token, URL, Params, ParamsMethod, Realm, Domain}).
 
+get_access_token(Client, URL, Params, ParamsMethod, Realm, Domain, RParams) ->
+  gen_server:call(Client, {get_access_token, URL, Params, ParamsMethod, Realm, Domain, RParams}).
+
 get(Client, URL) ->
   get(Client, URL, [], header).
 
@@ -60,6 +63,9 @@ get(Client, URL, Params, ParamsMethod) ->
 
 access_token_params(Client) ->
   gen_server:call(Client, {access_token_params}).
+
+request_token_params(Client) ->
+  gen_server:call(Client, {request_token_params}).
 
 deauthorize(Client) ->
   gen_server:cast(Client, deauthorize).
@@ -140,6 +146,16 @@ handle_call({get_access_token, URL, Params, ParamsMethod, Realm, Domain}, _From,
     Error ->
       {reply, Error, State}
   end;
+handle_call({get_access_token, URL, Params, ParamsMethod, Realm, Domain, RParams}, _From, State={Consumer}) ->
+  case oauth_post(ParamsMethod, URL, Params, Consumer, oauth:token(RParams), oauth:token_secret(RParams), Realm, Domain) of
+    {ok, Response={{_, 200, _}, _, _}} ->
+      AParams = oauth:params_decode(Response),
+      {reply, ok, {Consumer, RParams, AParams}};
+    {ok, Response} ->
+      {reply, Response, State};
+    Error ->
+      {reply, Error, State}
+  end;
 handle_call({get, URL, Params, ParamsMethod}, _From, State={Consumer, _RParams, AParams}) ->
   case oauth_get(ParamsMethod, URL, Params, Consumer, oauth:token(AParams), oauth:token_secret(AParams)) of
     {ok, {{_, 200, _}, Headers, Body}} ->
@@ -162,7 +178,9 @@ handle_call({get, URL, Params, ParamsMethod}, _From, State={Consumer, _RParams, 
       {reply, Error, State}
   end;
 handle_call({access_token_params}, _From, State={_Consumer, _RParams, AParams}) ->
-  {reply, AParams, State}.
+  {reply, AParams, State};
+handle_call({request_token_params}, _From, State={_Consumer, RParams}) ->
+  {reply, RParams, State}.
 
 handle_cast(deauthorize, {Consumer, _RParams}) ->
   {noreply, {Consumer}};
